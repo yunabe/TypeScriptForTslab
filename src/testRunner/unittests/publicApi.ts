@@ -1,16 +1,11 @@
 describe("Public APIs", () => {
     function verifyApi(fileName: string) {
         const builtFile = `built/local/${fileName}`;
-        const api = `api/${fileName}`;
         let fileContent: string;
         before(() => {
             fileContent = Harness.IO.readFile(builtFile)!;
             if (!fileContent) throw new Error(`File ${fileName} was not present in built/local`);
             fileContent = fileContent.replace(/\r\n/g, "\n");
-        });
-
-        it("should be acknowledged when they change", () => {
-            Harness.Baseline.runBaseline(api, fileContent);
         });
 
         it("should compile", () => {

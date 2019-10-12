@@ -1,5 +1,5 @@
 {
-    "name": "typescript",
+    "name": "@tslab/typescript-for-tslab",
     "author": "Microsoft Corp.",
     "homepage": "https://www.typescriptlang.org/",
     "version": "3.7.2",
@@ -17,7 +17,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/Microsoft/TypeScript.git"
+        "url": "https://github.com/yunabe/TypeScriptForTslab.git"
     },
     "main": "./lib/typescript.js",
     "typings": "./lib/typescript.d.ts",
