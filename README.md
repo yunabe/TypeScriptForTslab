@@ -1,3 +1,48 @@
+# TypeScript for tslab
+
+## Changes from TypeScript
+
+Base version: `vX.Y.Z`
+
+- Exports `findPrecedingToken` and `findNextToken` from `services/utilities.ts`.
+- Exports `Completions.getCompletionsAtPosition` from `services/completions.ts`.
+- Exports `locals` from `SourceFile`.
+- Exports `getDefaultTypeRoots` from `compiler/moduleNameResolver.ts`.
+- Defines `ts.getQuickInfoAtPosition`.
+- Defines `ts.getPreEmitDiagnosticsOfFiles`.
+- Remove `"bin"` from `package.json`.
+- Remove `"should be acknowledged when they change"` from `unittests/publicApi.ts` to skip the compatibility validation.
+
+## Merge with a newer version of TypeScript
+
+- Fetch a new release: `git fetch upstream`
+- Back to "Updates for tslab" commit: `git reset --hard HEAD@{2}`
+- Rebase the commit to the new tag: `git rebase -i --onto v3.7.3 v3.7.2 master`
+
+## Release
+
+**Build**
+
+```
+yarn gulp lint && yarn gulp runtests && yarn gulp LKG && yarn gulp clean
+```
+
+**publish**
+
+Set the new version in package.json
+
+```
+yarn semver "3.6.4-tslab" -i prerelease --preid tslab
+```
+
+Then, build the compiler and run:
+
+```
+npm publish --access=public
+```
+
+Note that `--access=public` is necessary because
+[*Scoped packages are private by default*](https://docs.npmjs.com/about-scopes).
 
 # TypeScript
 

@@ -334,6 +334,24 @@ namespace ts {
         return sortAndDeduplicateDiagnostics(diagnostics);
     }
 
+    export function getPreEmitDiagnosticsOfFiles(program: Program, sourceFiles: SourceFile[], cancellationToken?: CancellationToken): readonly Diagnostic[];
+    /*@internal*/ export function getPreEmitDiagnosticsOfFiles(program: BuilderProgram, sourceFiles: SourceFile[], cancellationToken?: CancellationToken): readonly Diagnostic[]; // eslint-disable-line @typescript-eslint/unified-signatures
+    export function getPreEmitDiagnosticsOfFiles(program: Program | BuilderProgram, sourceFiles: SourceFile[], cancellationToken?: CancellationToken): readonly Diagnostic[] {
+        const diagnostics = [
+            ...program.getConfigFileParsingDiagnostics(),
+            ...program.getOptionsDiagnostics(cancellationToken),
+            ...program.getGlobalDiagnostics(cancellationToken),
+        ];
+        for (const sourceFile of sourceFiles) {
+            addRange(diagnostics, program.getSyntacticDiagnostics(sourceFile, cancellationToken));
+            addRange(diagnostics, program.getSemanticDiagnostics(sourceFile, cancellationToken));
+            if (getEmitDeclarations(program.getCompilerOptions())) {
+                addRange(diagnostics, program.getDeclarationDiagnostics(sourceFile, cancellationToken));
+            }
+        }
+        return sortAndDeduplicateDiagnostics(diagnostics);
+    }
+
     export interface FormatDiagnosticsHost {
         getCurrentDirectory(): string;
         getCanonicalFileName(fileName: string): string;
