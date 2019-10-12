@@ -1,3 +1,40 @@
+# TypeScript for tslab
+
+## Changes from TypeScript
+
+Base version: `v3.6.4`
+
+- Exports `findPrecedingToken` and `findNextToken` from `services/utilities.ts`.
+- Exports `Completions.getCompletionsAtPosition` from `services/completions.ts`.
+- Defines `ts.getQuickInfoAtPosition`.
+- Exports `locals` from `SourceFile`.
+- Remove `"bin"` from `package.json`.
+- Remove `"should be acknowledged when they change"` from `unittests/publicApi.ts` to skip the compatibility validation.
+
+## Release
+
+**Build**
+
+```
+yarn gulp lint && yarn gulp runtests && yarn gulp LKG && yarn gulp clean
+```
+
+**publish**
+
+Set the new version in package.json
+
+```
+yarn semver "3.6.4-tslab" -i prerelease --preid tslab
+```
+
+Then, build the compiler and run:
+
+```
+npm publish --access=public
+```
+
+Note that `--access=public` is necessary because
+[*Scoped packages are private by default*](https://docs.npmjs.com/about-scopes).
 
 # TypeScript
 
