@@ -2923,6 +2923,8 @@ namespace ts {
         /* @internal */ localJsxFactory?: EntityName;
 
         /*@internal*/ exportedModulesFromDeclarationEmit?: ExportedModulesFromDeclarationEmit;
+
+        locals?: SymbolTable;
     }
 
     /*@internal*/
