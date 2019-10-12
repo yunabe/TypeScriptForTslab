@@ -1117,6 +1117,65 @@ namespace ts {
         }
     }
 
+    export function getQuickInfoAtPosition(sourceFile: SourceFile, typeChecker: TypeChecker, cancellationToken: CancellationToken, position: number): QuickInfo | undefined {
+        const node = getTouchingPropertyName(sourceFile, position);
+        if (node === sourceFile) {
+            // Avoid giving quickInfo for the sourceFile as a whole.
+            return undefined;
+        }
+
+        const nodeForQuickInfo = getNodeForQuickInfo(node);
+        const symbol = getSymbolAtLocationForQuickInfo(nodeForQuickInfo, typeChecker);
+
+        if (!symbol || typeChecker.isUnknownSymbol(symbol)) {
+            const type = shouldGetType(sourceFile, nodeForQuickInfo, position) ? typeChecker.getTypeAtLocation(nodeForQuickInfo) : undefined;
+            return type && {
+                kind: ScriptElementKind.unknown,
+                kindModifiers: ScriptElementKindModifier.none,
+                textSpan: createTextSpanFromNode(nodeForQuickInfo, sourceFile),
+                displayParts: typeChecker.runWithCancellationToken(cancellationToken, typeChecker => typeToDisplayParts(typeChecker, type, getContainerNode(nodeForQuickInfo))),
+                documentation: type.symbol ? type.symbol.getDocumentationComment(typeChecker) : undefined,
+                tags: type.symbol ? type.symbol.getJsDocTags() : undefined
+            };
+        }
+
+        const { symbolKind, displayParts, documentation, tags } = typeChecker.runWithCancellationToken(cancellationToken, typeChecker =>
+            SymbolDisplay.getSymbolDisplayPartsDocumentationAndSymbolKind(typeChecker, symbol, sourceFile, getContainerNode(nodeForQuickInfo), nodeForQuickInfo)
+        );
+        return {
+            kind: symbolKind,
+            kindModifiers: SymbolDisplay.getSymbolModifiers(symbol),
+            textSpan: createTextSpanFromNode(nodeForQuickInfo, sourceFile),
+            displayParts,
+            documentation,
+            tags,
+        };
+    }
+
+    function getNodeForQuickInfo(node: Node): Node {
+        if (isNewExpression(node.parent) && node.pos === node.parent.pos) {
+            return node.parent.expression;
+        }
+        return node;
+    }
+
+    function shouldGetType(sourceFile: SourceFile, node: Node, position: number): boolean {
+        switch (node.kind) {
+            case SyntaxKind.Identifier:
+                return !isLabelName(node) && !isTagName(node);
+            case SyntaxKind.PropertyAccessExpression:
+            case SyntaxKind.QualifiedName:
+                // Don't return quickInfo if inside the comment in `a/**/.b`
+                return !isInComment(sourceFile, position);
+            case SyntaxKind.ThisKeyword:
+            case SyntaxKind.ThisType:
+            case SyntaxKind.SuperKeyword:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     export function createLanguageService(
         host: LanguageServiceHost,
         documentRegistry: DocumentRegistry = createDocumentRegistry(host.useCaseSensitiveFileNames && host.useCaseSensitiveFileNames(), host.getCurrentDirectory()),
@@ -1464,63 +1523,8 @@ namespace ts {
             synchronizeHostData();
 
             const sourceFile = getValidSourceFile(fileName);
-            const node = getTouchingPropertyName(sourceFile, position);
-            if (node === sourceFile) {
-                // Avoid giving quickInfo for the sourceFile as a whole.
-                return undefined;
-            }
-
             const typeChecker = program.getTypeChecker();
-            const nodeForQuickInfo = getNodeForQuickInfo(node);
-            const symbol = getSymbolAtLocationForQuickInfo(nodeForQuickInfo, typeChecker);
-
-            if (!symbol || typeChecker.isUnknownSymbol(symbol)) {
-                const type = shouldGetType(sourceFile, nodeForQuickInfo, position) ? typeChecker.getTypeAtLocation(nodeForQuickInfo) : undefined;
-                return type && {
-                    kind: ScriptElementKind.unknown,
-                    kindModifiers: ScriptElementKindModifier.none,
-                    textSpan: createTextSpanFromNode(nodeForQuickInfo, sourceFile),
-                    displayParts: typeChecker.runWithCancellationToken(cancellationToken, typeChecker => typeToDisplayParts(typeChecker, type, getContainerNode(nodeForQuickInfo))),
-                    documentation: type.symbol ? type.symbol.getDocumentationComment(typeChecker) : undefined,
-                    tags: type.symbol ? type.symbol.getJsDocTags() : undefined
-                };
-            }
-
-            const { symbolKind, displayParts, documentation, tags } = typeChecker.runWithCancellationToken(cancellationToken, typeChecker =>
-                SymbolDisplay.getSymbolDisplayPartsDocumentationAndSymbolKind(typeChecker, symbol, sourceFile, getContainerNode(nodeForQuickInfo), nodeForQuickInfo)
-            );
-            return {
-                kind: symbolKind,
-                kindModifiers: SymbolDisplay.getSymbolModifiers(symbol),
-                textSpan: createTextSpanFromNode(nodeForQuickInfo, sourceFile),
-                displayParts,
-                documentation,
-                tags,
-            };
-        }
-
-        function getNodeForQuickInfo(node: Node): Node {
-            if (isNewExpression(node.parent) && node.pos === node.parent.pos) {
-                return node.parent.expression;
-            }
-            return node;
-        }
-
-        function shouldGetType(sourceFile: SourceFile, node: Node, position: number): boolean {
-            switch (node.kind) {
-                case SyntaxKind.Identifier:
-                    return !isLabelName(node) && !isTagName(node);
-                case SyntaxKind.PropertyAccessExpression:
-                case SyntaxKind.QualifiedName:
-                    // Don't return quickInfo if inside the comment in `a/**/.b`
-                    return !isInComment(sourceFile, position);
-                case SyntaxKind.ThisKeyword:
-                case SyntaxKind.ThisType:
-                case SyntaxKind.SuperKeyword:
-                    return true;
-                default:
-                    return false;
-            }
+            return ts.getQuickInfoAtPosition(sourceFile, typeChecker, cancellationToken, position);
         }
 
         /// Goto definition
