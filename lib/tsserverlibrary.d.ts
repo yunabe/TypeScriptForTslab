@@ -1747,6 +1747,7 @@ declare namespace ts {
          */
         hasNoDefaultLib: boolean;
         languageVersion: ScriptTarget;
+        locals?: SymbolTable;
     }
     export interface Bundle extends Node {
         kind: SyntaxKind.Bundle;
@@ -5681,9 +5682,16 @@ declare namespace ts {
         bigintLiteral = 25
     }
 }
+declare namespace ts.tslab {
+    function findPrecedingToken(position: number, sourceFile: SourceFile, startNode?: Node, excludeJsdoc?: boolean): Node | undefined;
+    function findNextToken(previousToken: Node, parent: Node, sourceFile: SourceFile): Node | undefined;
+}
 declare namespace ts {
     /** The classifier is used for syntactic highlighting in editors via the TSServer */
     function createClassifier(): Classifier;
+}
+declare namespace ts.tslab {
+    function getCompletionsAtPosition(host: LanguageServiceHost, program: Program, log: (message: string) => void, sourceFile: SourceFile, position: number, preferences: UserPreferences, triggerCharacter: CompletionsTriggerCharacter | undefined): CompletionInfo | undefined;
 }
 declare namespace ts {
     /**
@@ -5781,6 +5789,7 @@ declare namespace ts {
     function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: IScriptSnapshot, scriptTarget: ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ScriptKind): SourceFile;
     let disableIncrementalParsing: boolean;
     function updateLanguageServiceSourceFile(sourceFile: SourceFile, scriptSnapshot: IScriptSnapshot, version: string, textChangeRange: TextChangeRange | undefined, aggressiveChecks?: boolean): SourceFile;
+    function getQuickInfoAtPosition(sourceFile: SourceFile, typeChecker: TypeChecker, cancellationToken: CancellationToken, position: number): QuickInfo | undefined;
     function createLanguageService(host: LanguageServiceHost, documentRegistry?: DocumentRegistry, syntaxOnly?: boolean): LanguageService;
     /**
      * Get the path of the default library files (lib.d.ts) as distributed with the typescript
