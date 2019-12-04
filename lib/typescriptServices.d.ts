@@ -1776,6 +1776,7 @@ declare namespace ts {
          */
         hasNoDefaultLib: boolean;
         languageVersion: ScriptTarget;
+        locals?: SymbolTable;
     }
     export interface Bundle extends Node {
         kind: SyntaxKind.Bundle;
@@ -3812,6 +3813,13 @@ declare namespace ts {
 declare namespace ts {
     function getEffectiveTypeRoots(options: CompilerOptions, host: GetEffectiveTypeRootsHost): string[] | undefined;
     /**
+     * Returns the path to every node_modules/@types directory from some ancestor directory.
+     * Returns undefined if there are none.
+     */
+    function getDefaultTypeRoots(currentDirectory: string, host: {
+        directoryExists?: (directoryName: string) => boolean;
+    }): string[] | undefined;
+    /**
      * @param {string | undefined} containingFile - file that contains type reference directive, can be undefined if containing file is unknown.
      * This is possible in case if resolution is performed for directives specified via 'types' parameter. In this case initial path for secondary lookups
      * is assumed to be the same as root directory of the project.
@@ -4377,6 +4385,7 @@ declare namespace ts {
     export function resolveTripleslashReference(moduleName: string, containingFile: string): string;
     export function createCompilerHost(options: CompilerOptions, setParentNodes?: boolean): CompilerHost;
     export function getPreEmitDiagnostics(program: Program, sourceFile?: SourceFile, cancellationToken?: CancellationToken): readonly Diagnostic[];
+    export function getPreEmitDiagnosticsOfFiles(program: Program, sourceFiles: SourceFile[], cancellationToken?: CancellationToken): readonly Diagnostic[];
     export interface FormatDiagnosticsHost {
         getCurrentDirectory(): string;
         getCanonicalFileName(fileName: string): string;
@@ -5780,9 +5789,16 @@ declare namespace ts {
         bigintLiteral = 25
     }
 }
+declare namespace ts.tslab {
+    function findPrecedingToken(position: number, sourceFile: SourceFile, startNode?: Node, excludeJsdoc?: boolean): Node | undefined;
+    function findNextToken(previousToken: Node, parent: Node, sourceFile: SourceFile): Node | undefined;
+}
 declare namespace ts {
     /** The classifier is used for syntactic highlighting in editors via the TSServer */
     function createClassifier(): Classifier;
+}
+declare namespace ts.tslab {
+    function getCompletionsAtPosition(host: LanguageServiceHost, program: Program, log: (message: string) => void, sourceFile: SourceFile, position: number, preferences: UserPreferences, triggerCharacter: CompletionsTriggerCharacter | undefined): CompletionInfo | undefined;
 }
 declare namespace ts {
     /**
@@ -5880,6 +5896,7 @@ declare namespace ts {
     function createLanguageServiceSourceFile(fileName: string, scriptSnapshot: IScriptSnapshot, scriptTarget: ScriptTarget, version: string, setNodeParents: boolean, scriptKind?: ScriptKind): SourceFile;
     let disableIncrementalParsing: boolean;
     function updateLanguageServiceSourceFile(sourceFile: SourceFile, scriptSnapshot: IScriptSnapshot, version: string, textChangeRange: TextChangeRange | undefined, aggressiveChecks?: boolean): SourceFile;
+    function getQuickInfoAtPosition(sourceFile: SourceFile, typeChecker: TypeChecker, cancellationToken: CancellationToken, position: number): QuickInfo | undefined;
     function createLanguageService(host: LanguageServiceHost, documentRegistry?: DocumentRegistry, syntaxOnly?: boolean): LanguageService;
     /**
      * Get the path of the default library files (lib.d.ts) as distributed with the typescript
