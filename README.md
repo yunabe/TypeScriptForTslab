@@ -2,7 +2,7 @@
 
 ## Changes from TypeScript
 
-Base version: `vX.Y.Z`
+Base version: `v3.7.3`
 
 - Exports `findPrecedingToken` and `findNextToken` from `services/utilities.ts`.
 - Exports `Completions.getCompletionsAtPosition` from `services/completions.ts`.
