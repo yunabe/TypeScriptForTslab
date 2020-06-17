@@ -117,7 +117,7 @@ namespace ts.codefix {
     }
 
     function deleteTypeParameters(changes: textChanges.ChangeTracker, sourceFile: SourceFile, token: Node): void {
-        changes.delete(sourceFile, Debug.assertDefined(cast(token.parent, isDeclarationWithTypeParameterChildren).typeParameters, "The type parameter to delete should exist"));
+        changes.delete(sourceFile, Debug.checkDefined(cast(token.parent, isDeclarationWithTypeParameterChildren).typeParameters, "The type parameter to delete should exist"));
     }
 
     // Sometimes the diagnostic span is an entire ImportDeclaration, so we should remove the whole thing.
@@ -154,6 +154,13 @@ namespace ts.codefix {
         }
         if (isIdentifier(token) && canPrefix(token)) {
             changes.replaceNode(sourceFile, token, createIdentifier(`_${token.text}`));
+            if (isParameter(token.parent)) {
+                getJSDocParameterTags(token.parent).forEach((tag) => {
+                    if (isIdentifier(tag.name)) {
+                        changes.replaceNode(sourceFile, tag.name, createIdentifier(`_${tag.name.text}`));
+                    }
+                });
+            }
         }
     }
 

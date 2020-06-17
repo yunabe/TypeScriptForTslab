@@ -614,6 +614,7 @@ namespace ts {
         private namedDeclarations: Map<Declaration[]> | undefined;
         public ambientModuleNames!: string[];
         public checkJsDirective: CheckJsDirective | undefined;
+        public errorExpectations: TextRange[] | undefined;
         public possiblyContainDynamicImport?: boolean;
         public pragmas!: PragmaMap;
         public localJsxFactory: EntityName | undefined;
@@ -980,11 +981,6 @@ namespace ts {
             return names;
         }
 
-        public getVersion(path: Path): string {
-            const file = this.getHostFileInformation(path);
-            return (file && file.version)!; // TODO: GH#18217
-        }
-
         public getScriptSnapshot(path: Path): IScriptSnapshot {
             const file = this.getHostFileInformation(path);
             return (file && file.scriptSnapshot)!; // TODO: GH#18217
@@ -1287,7 +1283,7 @@ namespace ts {
             const projectReferences = hostCache.getProjectReferences();
 
             // If the program is already up-to-date, we can reuse it
-            if (isProgramUptoDate(program, rootFileNames, hostCache.compilationSettings(), path => hostCache!.getVersion(path), fileExists, hasInvalidatedResolution, !!host.hasChangedAutomaticTypeDirectiveNames, projectReferences)) {
+            if (isProgramUptoDate(program, rootFileNames, hostCache.compilationSettings(), (_path, fileName) => host.getScriptVersion(fileName), fileExists, hasInvalidatedResolution, !!host.hasChangedAutomaticTypeDirectiveNames, projectReferences)) {
                 return;
             }
 
@@ -1320,7 +1316,7 @@ namespace ts {
                     return host.getDirectories ? host.getDirectories(path) : [];
                 },
                 readDirectory(path, extensions, exclude, include, depth) {
-                    Debug.assertDefined(host.readDirectory, "'LanguageServiceHost.readDirectory' must be implemented to correctly process 'projectReferences'");
+                    Debug.checkDefined(host.readDirectory, "'LanguageServiceHost.readDirectory' must be implemented to correctly process 'projectReferences'");
                     return host.readDirectory!(path, extensions, exclude, include, depth);
                 },
                 onReleaseOldSourceFile,
@@ -1337,12 +1333,10 @@ namespace ts {
             if (host.resolveTypeReferenceDirectives) {
                 compilerHost.resolveTypeReferenceDirectives = (...args) => host.resolveTypeReferenceDirectives!(...args);
             }
-            if (host.setResolvedProjectReferenceCallbacks) {
-                compilerHost.setResolvedProjectReferenceCallbacks = callbacks => host.setResolvedProjectReferenceCallbacks!(callbacks);
-            }
             if (host.useSourceOfProjectReferenceRedirect) {
                 compilerHost.useSourceOfProjectReferenceRedirect = () => host.useSourceOfProjectReferenceRedirect!();
             }
+            host.setCompilerHost?.(compilerHost);
 
             const documentRegistryBucketKey = documentRegistry.getKeyForCompilationSettings(newSettings);
             const options: CreateProgramOptions = {
@@ -1439,7 +1433,7 @@ namespace ts {
                         // We do not support the scenario where a host can modify a registered
                         // file's script kind, i.e. in one project some file is treated as ".ts"
                         // and in another as ".js"
-                        Debug.assertEqual(hostFileInformation.scriptKind, oldSourceFile.scriptKind, "Registered script kind should match new script kind.", path);
+                        Debug.assertEqual(hostFileInformation.scriptKind, oldSourceFile.scriptKind, "Registered script kind should match new script kind.");
 
                         return documentRegistry.updateDocumentWithKey(fileName, path, newSettings, documentRegistryBucketKey, hostFileInformation.scriptSnapshot, hostFileInformation.version, hostFileInformation.scriptKind);
                     }
@@ -1470,8 +1464,10 @@ namespace ts {
 
         function dispose(): void {
             if (program) {
+                // Use paths to ensure we are using correct key and paths as document registry could bre created with different current directory than host
+                const key = documentRegistry.getKeyForCompilationSettings(program.getCompilerOptions());
                 forEach(program.getSourceFiles(), f =>
-                    documentRegistry.releaseDocument(f.fileName, program.getCompilerOptions()));
+                    documentRegistry.releaseDocumentWithKey(f.resolvedPath, key));
                 program = undefined!; // TODO: GH#18217
             }
             host = undefined!;
@@ -1543,15 +1539,15 @@ namespace ts {
                 position,
                 { name, source },
                 host,
-                (formattingOptions && formatting.getFormatContext(formattingOptions))!, // TODO: GH#18217
+                (formattingOptions && formatting.getFormatContext(formattingOptions, host))!, // TODO: GH#18217
                 preferences,
                 cancellationToken,
             );
         }
 
-        function getCompletionEntrySymbol(fileName: string, position: number, name: string, source?: string): Symbol | undefined {
+        function getCompletionEntrySymbol(fileName: string, position: number, name: string, source?: string, preferences: UserPreferences = emptyOptions): Symbol | undefined {
             synchronizeHostData();
-            return Completions.getCompletionEntrySymbol(program, log, getValidSourceFile(fileName), position, { name, source }, host);
+            return Completions.getCompletionEntrySymbol(program, log, getValidSourceFile(fileName), position, { name, source }, host, preferences);
         }
 
         function getQuickInfoAtPosition(fileName: string, position: number): QuickInfo | undefined {
@@ -1826,16 +1822,16 @@ namespace ts {
 
         function getFormattingEditsForRange(fileName: string, start: number, end: number, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            return formatting.formatSelection(start, end, sourceFile, formatting.getFormatContext(toEditorSettings(options)));
+            return formatting.formatSelection(start, end, sourceFile, formatting.getFormatContext(toEditorSettings(options), host));
         }
 
         function getFormattingEditsForDocument(fileName: string, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
-            return formatting.formatDocument(syntaxTreeCache.getCurrentSourceFile(fileName), formatting.getFormatContext(toEditorSettings(options)));
+            return formatting.formatDocument(syntaxTreeCache.getCurrentSourceFile(fileName), formatting.getFormatContext(toEditorSettings(options), host));
         }
 
         function getFormattingEditsAfterKeystroke(fileName: string, position: number, key: string, options: FormatCodeOptions | FormatCodeSettings): TextChange[] {
             const sourceFile = syntaxTreeCache.getCurrentSourceFile(fileName);
-            const formatContext = formatting.getFormatContext(toEditorSettings(options));
+            const formatContext = formatting.getFormatContext(toEditorSettings(options), host);
 
             if (!isInComment(sourceFile, position)) {
                 switch (key) {
@@ -1857,7 +1853,7 @@ namespace ts {
             synchronizeHostData();
             const sourceFile = getValidSourceFile(fileName);
             const span = createTextSpanFromBounds(start, end);
-            const formatContext = formatting.getFormatContext(formatOptions);
+            const formatContext = formatting.getFormatContext(formatOptions, host);
 
             return flatMap(deduplicate<number>(errorCodes, equateValues, compareValues), errorCode => {
                 cancellationToken.throwIfCancellationRequested();
@@ -1869,7 +1865,7 @@ namespace ts {
             synchronizeHostData();
             Debug.assert(scope.type === "file");
             const sourceFile = getValidSourceFile(scope.fileName);
-            const formatContext = formatting.getFormatContext(formatOptions);
+            const formatContext = formatting.getFormatContext(formatOptions, host);
 
             return codefix.getAllFixes({ fixId, sourceFile, program, host, cancellationToken, formatContext, preferences });
         }
@@ -1878,13 +1874,13 @@ namespace ts {
             synchronizeHostData();
             Debug.assert(scope.type === "file");
             const sourceFile = getValidSourceFile(scope.fileName);
-            const formatContext = formatting.getFormatContext(formatOptions);
+            const formatContext = formatting.getFormatContext(formatOptions, host);
 
             return OrganizeImports.organizeImports(sourceFile, formatContext, host, program, preferences);
         }
 
         function getEditsForFileRename(oldFilePath: string, newFilePath: string, formatOptions: FormatCodeSettings, preferences: UserPreferences = emptyOptions): readonly FileTextChanges[] {
-            return ts.getEditsForFileRename(getProgram()!, oldFilePath, newFilePath, host, formatting.getFormatContext(formatOptions), preferences, sourceMapper);
+            return ts.getEditsForFileRename(getProgram()!, oldFilePath, newFilePath, host, formatting.getFormatContext(formatOptions, host), preferences, sourceMapper);
         }
 
         function applyCodeActionCommand(action: CodeActionCommand, formatSettings?: FormatCodeSettings): Promise<ApplyCodeActionCommandResult>;
@@ -2127,7 +2123,7 @@ namespace ts {
                 endPosition,
                 program: getProgram()!,
                 host,
-                formatContext: formatting.getFormatContext(formatOptions!), // TODO: GH#18217
+                formatContext: formatting.getFormatContext(formatOptions!, host), // TODO: GH#18217
                 cancellationToken,
                 preferences,
             };
@@ -2231,6 +2227,7 @@ namespace ts {
             getEditsForRefactor,
             toLineColumnOffset: sourceMapper.toLineColumnOffset,
             getSourceMapper: () => sourceMapper,
+            clearSourceMapperCache: () => sourceMapper.clearCache(),
             prepareCallHierarchy,
             provideCallHierarchyIncomingCalls,
             provideCallHierarchyOutgoingCalls

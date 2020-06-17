@@ -896,14 +896,7 @@ declare var console: {
             const host = createServerHost([barConfig, barIndex, fooConfig, fooIndex, barSymLink, lib2017, libDom]);
             const session = createSession(host, { canUseEvents: true, });
             openFilesForSession([fooIndex, barIndex], session);
-            verifyGetErrRequest({
-                session,
-                host,
-                expected: [
-                    { file: barIndex, syntax: [], semantic: [], suggestion: [] },
-                    { file: fooIndex, syntax: [], semantic: [], suggestion: [] },
-                ]
-            });
+            verifyGetErrRequestNoErrors({ session, host, files: [barIndex, fooIndex] });
         });
 
         it("when file name starts with ^", () => {
@@ -983,18 +976,12 @@ declare var console: {
                 }
                 const service = session.getProjectService();
                 checkProjectBeforeError(service);
-                verifyGetErrRequest({
+                verifyGetErrRequestNoErrors({
                     session,
                     host,
-                    expected: errorOnNewFileBeforeOldFile ?
-                        [
-                            { file: fooBar, syntax: [], semantic: [], suggestion: [] },
-                            { file: foo, syntax: [], semantic: [], suggestion: [] },
-                        ] :
-                        [
-                            { file: foo, syntax: [], semantic: [], suggestion: [] },
-                            { file: fooBar, syntax: [], semantic: [], suggestion: [] },
-                        ],
+                    files: errorOnNewFileBeforeOldFile ?
+                        [fooBar, foo] :
+                        [foo, fooBar],
                     existingTimeouts: 2
                 });
                 checkProjectAfterError(service);
@@ -1062,6 +1049,64 @@ declare var console: {
                     });
                 });
             });
+        });
+
+        it("when default configured project does not contain the file", () => {
+            const barConfig: File = {
+                path: `${tscWatch.projectRoot}/bar/tsconfig.json`,
+                content: "{}"
+            };
+            const barIndex: File = {
+                path: `${tscWatch.projectRoot}/bar/index.ts`,
+                content: `import {foo} from "../foo/lib";
+foo();`
+            };
+            const fooBarConfig: File = {
+                path: `${tscWatch.projectRoot}/foobar/tsconfig.json`,
+                content: barConfig.path
+            };
+            const fooBarIndex: File = {
+                path: `${tscWatch.projectRoot}/foobar/index.ts`,
+                content: barIndex.content
+            };
+            const fooConfig: File = {
+                path: `${tscWatch.projectRoot}/foo/tsconfig.json`,
+                content: JSON.stringify({
+                    include: ["index.ts"],
+                    compilerOptions: {
+                        declaration: true,
+                        outDir: "lib"
+                    }
+                })
+            };
+            const fooIndex: File = {
+                path: `${tscWatch.projectRoot}/foo/index.ts`,
+                content: `export function foo() {}`
+            };
+            const host = createServerHost([barConfig, barIndex, fooBarConfig, fooBarIndex, fooConfig, fooIndex, libFile]);
+            tscWatch.ensureErrorFreeBuild(host, [fooConfig.path]);
+            const fooDts = `${tscWatch.projectRoot}/foo/lib/index.d.ts`;
+            assert.isTrue(host.fileExists(fooDts));
+            const session = createSession(host);
+            const service = session.getProjectService();
+            service.openClientFile(barIndex.path);
+            checkProjectActualFiles(service.configuredProjects.get(barConfig.path)!, [barIndex.path, fooDts, libFile.path, barConfig.path]);
+            service.openClientFile(fooBarIndex.path);
+            checkProjectActualFiles(service.configuredProjects.get(fooBarConfig.path)!, [fooBarIndex.path, fooDts, libFile.path, fooBarConfig.path]);
+            service.openClientFile(fooIndex.path);
+            checkProjectActualFiles(service.configuredProjects.get(fooConfig.path)!, [fooIndex.path, libFile.path, fooConfig.path]);
+            service.openClientFile(fooDts);
+            session.executeCommandSeq<protocol.GetApplicableRefactorsRequest>({
+                command: protocol.CommandTypes.GetApplicableRefactors,
+                arguments: {
+                    file: fooDts,
+                    startLine: 1,
+                    startOffset: 1,
+                    endLine: 1,
+                    endOffset: 1
+                }
+            });
+            assert.equal(service.tryGetDefaultProjectForFile(server.toNormalizedPath(fooDts)), service.configuredProjects.get(barConfig.path));
         });
     });
 
@@ -1231,6 +1276,40 @@ declare var console: {
             const watchedRecursiveDirectories = getTypeRootsFromLocation(root + "/a/b/src");
             watchedRecursiveDirectories.push(`${root}/a/b/src/node_modules`, `${root}/a/b/node_modules`);
             checkWatchedDirectories(host, watchedRecursiveDirectories, /*recursive*/ true);
+        });
+    });
+
+    describe("unittests:: tsserver:: ConfiguredProjects:: when reading tsconfig file fails", () => {
+        it("should be tolerated without crashing the server", () => {
+            const configFile = {
+                path: `${tscWatch.projectRoot}/tsconfig.json`,
+                content: ""
+            };
+            const file1 = {
+                path: `${tscWatch.projectRoot}/file1.ts`,
+                content: "let t = 10;"
+            };
+
+            const host = createServerHost([file1, libFile, configFile]);
+            const { session, events } = createSessionWithEventTracking<server.ConfigFileDiagEvent>(host, server.ConfigFileDiagEvent);
+            const originalReadFile = host.readFile;
+            host.readFile = f => {
+                return f === configFile.path ?
+                    undefined :
+                    originalReadFile.call(host, f);
+            };
+            openFilesForSession([file1], session);
+
+            assert.deepEqual(events, [{
+                eventName: server.ConfigFileDiagEvent,
+                data: {
+                    triggerFile: file1.path,
+                    configFileName: configFile.path,
+                    diagnostics: [
+                        createCompilerDiagnostic(Diagnostics.Cannot_read_file_0, configFile.path)
+                    ]
+                }
+            }]);
         });
     });
 }

@@ -320,16 +320,6 @@ namespace ts {
             }
         }
 
-        function setValueDeclaration(symbol: Symbol, node: Declaration): void {
-            const { valueDeclaration } = symbol;
-            if (!valueDeclaration ||
-                (isAssignmentDeclaration(valueDeclaration) && !isAssignmentDeclaration(node)) ||
-                (valueDeclaration.kind !== node.kind && isEffectiveModuleDeclaration(valueDeclaration))) {
-                // other kinds of value declarations take precedence over modules and assignment declarations
-                symbol.valueDeclaration = node;
-            }
-        }
-
         // Should not be called on a declaration with a computed property name,
         // unless it is a well known Symbol.
         function getDeclarationName(node: Declaration): __String | undefined {
@@ -409,7 +399,7 @@ namespace ts {
         }
 
         function getDisplayName(node: Declaration): string {
-            return isNamedDeclaration(node) ? declarationNameToString(node.name) : unescapeLeadingUnderscores(Debug.assertDefined(getDeclarationName(node)));
+            return isNamedDeclaration(node) ? declarationNameToString(node.name) : unescapeLeadingUnderscores(Debug.checkDefined(getDeclarationName(node)));
         }
 
         /**
@@ -423,7 +413,7 @@ namespace ts {
         function declareSymbol(symbolTable: SymbolTable, parent: Symbol | undefined, node: Declaration, includes: SymbolFlags, excludes: SymbolFlags, isReplaceableByMethod?: boolean): Symbol {
             Debug.assert(!hasDynamicName(node));
 
-            const isDefaultExport = hasModifier(node, ModifierFlags.Default);
+            const isDefaultExport = hasModifier(node, ModifierFlags.Default) || isExportSpecifier(node) && node.name.escapedText === "default";
 
             // The exported symbol for an export default function/class node is always named "default"
             const name = isDefaultExport && parent ? InternalSymbolName.Default : getDeclarationName(node);
@@ -833,6 +823,9 @@ namespace ts {
                 case SyntaxKind.CallExpression:
                     bindCallExpressionFlow(<CallExpression>node);
                     break;
+                case SyntaxKind.NonNullExpression:
+                    bindNonNullExpressionFlow(<NonNullExpression>node);
+                    break;
                 case SyntaxKind.JSDocTypedefTag:
                 case SyntaxKind.JSDocCallbackTag:
                 case SyntaxKind.JSDocEnumTag:
@@ -950,6 +943,10 @@ namespace ts {
 
         function createLoopLabel(): FlowLabel {
             return initFlowNode({ flags: FlowFlags.LoopLabel, antecedents: undefined });
+        }
+
+        function createReduceLabel(target: FlowLabel, antecedents: FlowNode[], antecedent: FlowNode): FlowReduceLabel {
+            return initFlowNode({ flags: FlowFlags.ReduceLabel, target, antecedents, antecedent });
         }
 
         function setFlowNodeReferenced(flow: FlowNode) {
@@ -1209,35 +1206,36 @@ namespace ts {
         }
 
         function bindTryStatement(node: TryStatement): void {
-            const preFinallyLabel = createBranchLabel();
             // We conservatively assume that *any* code in the try block can cause an exception, but we only need
             // to track code that causes mutations (because only mutations widen the possible control flow type of
-            // a variable). The currentExceptionTarget is the target label for control flows that result from
-            // exceptions. We add all mutation flow nodes as antecedents of this label such that we can analyze them
-            // as possible antecedents of the start of catch or finally blocks. Furthermore, we add the current
-            // control flow to represent exceptions that occur before any mutations.
+            // a variable). The exceptionLabel is the target label for control flows that result from exceptions.
+            // We add all mutation flow nodes as antecedents of this label such that we can analyze them as possible
+            // antecedents of the start of catch or finally blocks. Furthermore, we add the current control flow to
+            // represent exceptions that occur before any mutations.
             const saveReturnTarget = currentReturnTarget;
             const saveExceptionTarget = currentExceptionTarget;
-            currentReturnTarget = createBranchLabel();
-            currentExceptionTarget = node.catchClause ? createBranchLabel() : currentReturnTarget;
-            addAntecedent(currentExceptionTarget, currentFlow);
+            const normalExitLabel = createBranchLabel();
+            const returnLabel = createBranchLabel();
+            let exceptionLabel = createBranchLabel();
+            if (node.finallyBlock) {
+                currentReturnTarget = returnLabel;
+            }
+            addAntecedent(exceptionLabel, currentFlow);
+            currentExceptionTarget = exceptionLabel;
             bind(node.tryBlock);
-            addAntecedent(preFinallyLabel, currentFlow);
-            const flowAfterTry = currentFlow;
-            let flowAfterCatch = unreachableFlow;
+            addAntecedent(normalExitLabel, currentFlow);
             if (node.catchClause) {
                 // Start of catch clause is the target of exceptions from try block.
-                currentFlow = finishFlowLabel(currentExceptionTarget);
+                currentFlow = finishFlowLabel(exceptionLabel);
                 // The currentExceptionTarget now represents control flows from exceptions in the catch clause.
                 // Effectively, in a try-catch-finally, if an exception occurs in the try block, the catch block
                 // acts like a second try block.
-                currentExceptionTarget = currentReturnTarget;
-                addAntecedent(currentExceptionTarget, currentFlow);
+                exceptionLabel = createBranchLabel();
+                addAntecedent(exceptionLabel, currentFlow);
+                currentExceptionTarget = exceptionLabel;
                 bind(node.catchClause);
-                addAntecedent(preFinallyLabel, currentFlow);
-                flowAfterCatch = currentFlow;
+                addAntecedent(normalExitLabel, currentFlow);
             }
-            const exceptionTarget = finishFlowLabel(currentExceptionTarget);
             currentReturnTarget = saveReturnTarget;
             currentExceptionTarget = saveExceptionTarget;
             if (node.finallyBlock) {
@@ -1250,35 +1248,33 @@ namespace ts {
                 // When analyzing a control flow graph that starts inside a finally block we want to consider all
                 // five possibilities above. However, when analyzing a control flow graph that starts outside (past)
                 // the finally block, we only want to consider the first two (if we're past a finally block then it
-                // must have completed normally). To make this possible, we inject two extra nodes into the control
-                // flow graph: An after-finally with an antecedent of the control flow at the end of the finally
-                // block, and a pre-finally with an antecedent that represents all exceptional control flows. The
-                // 'lock' property of the pre-finally references the after-finally, and the after-finally has a
-                // boolean 'locked' property that we set to true when analyzing a control flow that contained the
-                // the after-finally node. When the lock associated with a pre-finally is locked, the antecedent of
-                // the pre-finally (i.e. the exceptional control flows) are skipped.
-                const preFinallyFlow: PreFinallyFlow = initFlowNode({ flags: FlowFlags.PreFinally, antecedent: exceptionTarget, lock: {} });
-                addAntecedent(preFinallyLabel, preFinallyFlow);
-                currentFlow = finishFlowLabel(preFinallyLabel);
+                // must have completed normally). Likewise, when analyzing a control flow graph from return statements
+                // in try or catch blocks in an IIFE, we only want to consider the third. To make this possible, we
+                // inject a ReduceLabel node into the control flow graph. This node contains an alternate reduced
+                // set of antecedents for the pre-finally label. As control flow analysis passes by a ReduceLabel
+                // node, the pre-finally label is temporarily switched to the reduced antecedent set.
+                const finallyLabel = createBranchLabel();
+                finallyLabel.antecedents = concatenate(concatenate(normalExitLabel.antecedents, exceptionLabel.antecedents), returnLabel.antecedents);
+                currentFlow = finallyLabel;
                 bind(node.finallyBlock);
-                // If the end of the finally block is reachable, but the end of the try and catch blocks are not,
-                // convert the current flow to unreachable. For example, 'try { return 1; } finally { ... }' should
-                // result in an unreachable current control flow.
-                if (!(currentFlow.flags & FlowFlags.Unreachable)) {
-                    if ((flowAfterTry.flags & FlowFlags.Unreachable) && (flowAfterCatch.flags & FlowFlags.Unreachable)) {
-                        currentFlow = flowAfterTry === reportedUnreachableFlow || flowAfterCatch === reportedUnreachableFlow
-                            ? reportedUnreachableFlow
-                            : unreachableFlow;
-                    }
+                if (currentFlow.flags & FlowFlags.Unreachable) {
+                    // If the end of the finally block is unreachable, the end of the entire try statement is unreachable.
+                    currentFlow = unreachableFlow;
                 }
-                if (!(currentFlow.flags & FlowFlags.Unreachable)) {
-                    const afterFinallyFlow: AfterFinallyFlow = initFlowNode({ flags: FlowFlags.AfterFinally, antecedent: currentFlow });
-                    preFinallyFlow.lock = afterFinallyFlow;
-                    currentFlow = afterFinallyFlow;
+                else {
+                    // If we have an IIFE return target and return statements in the try or catch blocks, add a control
+                    // flow that goes back through the finally block and back through only the return statements.
+                    if (currentReturnTarget && returnLabel.antecedents) {
+                        addAntecedent(currentReturnTarget, createReduceLabel(finallyLabel, returnLabel.antecedents, currentFlow));
+                    }
+                    // If the end of the finally block is reachable, but the end of the try and catch blocks are not,
+                    // convert the current flow to unreachable. For example, 'try { return 1; } finally { ... }' should
+                    // result in an unreachable current control flow.
+                    currentFlow = normalExitLabel.antecedents ? createReduceLabel(finallyLabel, normalExitLabel.antecedents, currentFlow) : unreachableFlow;
                 }
             }
             else {
-                currentFlow = finishFlowLabel(preFinallyLabel);
+                currentFlow = finishFlowLabel(normalExitLabel);
             }
         }
 
@@ -1665,15 +1661,17 @@ namespace ts {
         }
 
         function bindOptionalChainRest(node: OptionalChain) {
-            bind(node.questionDotToken);
             switch (node.kind) {
                 case SyntaxKind.PropertyAccessExpression:
+                    bind(node.questionDotToken);
                     bind(node.name);
                     break;
                 case SyntaxKind.ElementAccessExpression:
+                    bind(node.questionDotToken);
                     bind(node.argumentExpression);
                     break;
                 case SyntaxKind.CallExpression:
+                    bind(node.questionDotToken);
                     bindEach(node.typeArguments);
                     bindEach(node.arguments);
                     break;
@@ -1692,7 +1690,7 @@ namespace ts {
             // and build it's CFA graph as if it were the first condition (`a && ...`). Then we bind the rest
             // of the node as part of the "true" branch, and continue to do so as we ascend back up to the outermost
             // chain node. We then treat the entire node as the right side of the expression.
-            const preChainLabel = node.questionDotToken ? createBranchLabel() : undefined;
+            const preChainLabel = isOptionalChainRoot(node) ? createBranchLabel() : undefined;
             bindOptionalExpression(node.expression, preChainLabel || trueTarget, falseTarget);
             if (preChainLabel) {
                 currentFlow = finishFlowLabel(preChainLabel);
@@ -1715,7 +1713,7 @@ namespace ts {
             }
         }
 
-        function bindAccessExpressionFlow(node: AccessExpression) {
+        function bindNonNullExpressionFlow(node: NonNullExpression | NonNullChain) {
             if (isOptionalChain(node)) {
                 bindOptionalChainFlow(node);
             }
@@ -1724,7 +1722,16 @@ namespace ts {
             }
         }
 
-        function bindCallExpressionFlow(node: CallExpression) {
+        function bindAccessExpressionFlow(node: AccessExpression | PropertyAccessChain | ElementAccessChain) {
+            if (isOptionalChain(node)) {
+                bindOptionalChainFlow(node);
+            }
+            else {
+                bindEachChild(node);
+            }
+        }
+
+        function bindCallExpressionFlow(node: CallExpression | CallChain) {
             if (isOptionalChain(node)) {
                 bindOptionalChainFlow(node);
             }
@@ -2113,7 +2120,9 @@ namespace ts {
                                 container = (declName.parent.expression as PropertyAccessExpression).name;
                                 break;
                             case AssignmentDeclarationKind.Property:
-                                container = isPropertyAccessExpression(declName.parent.expression) ? declName.parent.expression.name : declName.parent.expression;
+                                container = isExportsOrModuleExportsOrAlias(file, declName.parent.expression) ? file
+                                    : isPropertyAccessExpression(declName.parent.expression) ? declName.parent.expression.name
+                                    : declName.parent.expression;
                                 break;
                             case AssignmentDeclarationKind.None:
                                 return Debug.fail("Shouldn't have detected typedef or enum on non-assignment declaration");
@@ -2968,15 +2977,13 @@ namespace ts {
                 //    util.property = function ...
                 bindExportsPropertyAssignment(node as BindableStaticPropertyAssignmentExpression);
             }
+            else if (hasDynamicName(node)) {
+                bindAnonymousDeclaration(node, SymbolFlags.Property | SymbolFlags.Assignment, InternalSymbolName.Computed);
+                const sym = bindPotentiallyMissingNamespaces(parentSymbol, node.left.expression, isTopLevelNamespaceAssignment(node.left), /*isPrototype*/ false, /*containerIsClass*/ false);
+                addLateBoundAssignmentDeclarationToSymbol(node, sym);
+            }
             else {
-                if (hasDynamicName(node)) {
-                    bindAnonymousDeclaration(node, SymbolFlags.Property | SymbolFlags.Assignment, InternalSymbolName.Computed);
-                    const sym = bindPotentiallyMissingNamespaces(parentSymbol, node.left.expression, isTopLevelNamespaceAssignment(node.left), /*isPrototype*/ false, /*containerIsClass*/ false);
-                    addLateBoundAssignmentDeclarationToSymbol(node, sym);
-                }
-                else {
-                    bindStaticPropertyAssignment(cast(node.left, isBindableStaticAccessExpression));
-                }
+                bindStaticPropertyAssignment(cast(node.left, isBindableStaticNameExpression));
             }
         }
 
@@ -2984,7 +2991,8 @@ namespace ts {
          * For nodes like `x.y = z`, declare a member 'y' on 'x' if x is a function (or IIFE) or class or {}, or not declared.
          * Also works for expression statements preceded by JSDoc, like / ** @type number * / x.y;
          */
-        function bindStaticPropertyAssignment(node: BindableStaticAccessExpression) {
+        function bindStaticPropertyAssignment(node: BindableStaticNameExpression) {
+            Debug.assert(!isIdentifier(node));
             node.expression.parent = node;
             bindPropertyAssignment(node.expression, node, /*isPrototypeProperty*/ false, /*containerIsClass*/ false);
         }
@@ -3233,7 +3241,7 @@ namespace ts {
             // If this is a property-parameter, then also declare the property symbol into the
             // containing class.
             if (isParameterPropertyDeclaration(node, node.parent)) {
-                const classDeclaration = <ClassLikeDeclaration>node.parent.parent;
+                const classDeclaration = node.parent.parent;
                 declareSymbol(classDeclaration.symbol.members!, classDeclaration.symbol, node, SymbolFlags.Property | (node.questionToken ? SymbolFlags.Optional : SymbolFlags.None), SymbolFlags.PropertyExcludes);
             }
         }
@@ -3523,6 +3531,10 @@ namespace ts {
             case SyntaxKind.ElementAccessExpression:
                 return computeElementAccess(<ElementAccessExpression>node, subtreeFlags);
 
+            case SyntaxKind.JsxSelfClosingElement:
+            case SyntaxKind.JsxOpeningElement:
+                return computeJsxOpeningLikeElement(<JsxOpeningLikeElement>node, subtreeFlags);
+
             default:
                 return computeOther(node, kind, subtreeFlags);
         }
@@ -3570,6 +3582,15 @@ namespace ts {
         }
         node.transformFlags = transformFlags | TransformFlags.HasComputedFlags;
         return transformFlags & ~TransformFlags.ArrayLiteralOrCallOrNewExcludes;
+    }
+
+    function computeJsxOpeningLikeElement(node: JsxOpeningLikeElement, subtreeFlags: TransformFlags) {
+        let transformFlags = subtreeFlags | TransformFlags.AssertJsx;
+        if (node.typeArguments) {
+            transformFlags |= TransformFlags.AssertTypeScript;
+        }
+        node.transformFlags = transformFlags | TransformFlags.HasComputedFlags;
+        return transformFlags & ~TransformFlags.NodeExcludes;
     }
 
     function computeBinaryExpression(node: BinaryExpression, subtreeFlags: TransformFlags) {
@@ -4105,8 +4126,6 @@ namespace ts {
                 break;
 
             case SyntaxKind.JsxElement:
-            case SyntaxKind.JsxSelfClosingElement:
-            case SyntaxKind.JsxOpeningElement:
             case SyntaxKind.JsxText:
             case SyntaxKind.JsxClosingElement:
             case SyntaxKind.JsxFragment:
@@ -4124,8 +4143,18 @@ namespace ts {
             case SyntaxKind.TemplateHead:
             case SyntaxKind.TemplateMiddle:
             case SyntaxKind.TemplateTail:
-            case SyntaxKind.TemplateExpression:
+                if ((<NoSubstitutionTemplateLiteral | TemplateHead | TemplateMiddle | TemplateTail>node).templateFlags) {
+                    transformFlags |= TransformFlags.AssertES2018;
+                    break;
+                }
+                // falls through
             case SyntaxKind.TaggedTemplateExpression:
+                if (hasInvalidEscape((<TaggedTemplateExpression>node).template)) {
+                    transformFlags |= TransformFlags.AssertES2018;
+                    break;
+                }
+                // falls through
+            case SyntaxKind.TemplateExpression:
             case SyntaxKind.ShorthandPropertyAssignment:
             case SyntaxKind.StaticKeyword:
             case SyntaxKind.MetaProperty:

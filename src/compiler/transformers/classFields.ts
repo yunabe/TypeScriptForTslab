@@ -518,7 +518,7 @@ namespace ts {
 
             if (some(staticProperties) || some(pendingExpressions)) {
                 if (isDecoratedClassDeclaration) {
-                    Debug.assertDefined(pendingStatements, "Decorated classes transformed by TypeScript are expected to be within a variable declaration.");
+                    Debug.assertIsDefined(pendingStatements, "Decorated classes transformed by TypeScript are expected to be within a variable declaration.");
 
                     // Write any pending expressions from elided or moved computed property names
                     if (pendingStatements && pendingExpressions && some(pendingExpressions)) {
@@ -606,7 +606,7 @@ namespace ts {
                         createConstructor(
                             /*decorators*/ undefined,
                             /*modifiers*/ undefined,
-                            parameters,
+                            parameters ?? [],
                             body
                         ),
                         constructor || node
@@ -976,7 +976,7 @@ namespace ts {
             );
         }
 
-        function visitArrayAssignmentTarget(node: AssignmentPattern) {
+        function visitArrayAssignmentTarget(node: BindingOrAssignmentElement) {
             const target = getTargetOfBindingOrAssignmentElement(node);
             if (target && isPrivateIdentifierPropertyAccessExpression(target)) {
                 const wrapped = wrapPrivateIdentifierForDestructuringTarget(target);

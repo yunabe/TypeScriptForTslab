@@ -516,6 +516,10 @@ namespace FourSlashInterface {
             this.state.verifyRenameLocations(startRanges, options);
         }
 
+        public baselineRename(marker: string, options: RenameOptions) {
+            this.state.baselineRename(marker, options);
+        }
+
         public verifyQuickInfoDisplayParts(kind: string, kindModifiers: string, textSpan: FourSlash.TextSpan,
             displayParts: ts.SymbolDisplayPart[], documentation: ts.SymbolDisplayPart[], tags: ts.JSDocTagInfo[]) {
             this.state.verifyQuickInfoDisplayParts(kind, kindModifiers, textSpan, displayParts, documentation, tags);
@@ -555,6 +559,10 @@ namespace FourSlashInterface {
 
         public noMoveToNewFile(): void {
             this.state.noMoveToNewFile();
+        }
+
+        public organizeImports(newContent: string) {
+            this.state.verifyOrganizeImports(newContent);
         }
     }
 
@@ -841,6 +849,7 @@ namespace FourSlashInterface {
     }
     export namespace Completion {
         export import SortText = ts.Completions.SortText;
+        export import CompletionSource = ts.Completions.CompletionSource;
 
         const functionEntry = (name: string): ExpectedCompletionEntryObject => ({
             name,
@@ -893,7 +902,7 @@ namespace FourSlashInterface {
         const res: ExpectedCompletionEntryObject[] = [];
         for (let i = ts.SyntaxKind.FirstKeyword; i <= ts.SyntaxKind.LastKeyword; i++) {
             res.push({
-                name: ts.Debug.assertDefined(ts.tokenToString(i)),
+                name: ts.Debug.checkDefined(ts.tokenToString(i)),
                 kind: "keyword",
                 sortText: SortText.GlobalsOrKeywords
             });
@@ -1623,4 +1632,9 @@ namespace FourSlashInterface {
         template: string
     };
     export type RenameLocationOptions = FourSlash.Range | { readonly range: FourSlash.Range, readonly prefixText?: string, readonly suffixText?: string };
+    export interface RenameOptions {
+        readonly findInStrings?: boolean;
+        readonly findInComments?: boolean;
+        readonly providePrefixAndSuffixTextForRename?: boolean;
+    };
 }
