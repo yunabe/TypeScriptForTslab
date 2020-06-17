@@ -2876,12 +2876,3 @@ namespace ts {
 
     // #endregion
 }
-
-namespace ts.tslab {
-    export function findPrecedingToken(position: number, sourceFile: SourceFile, startNode?: Node, excludeJsdoc?: boolean): Node | undefined {
-        return ts.findPrecedingToken(position, sourceFile, startNode, excludeJsdoc);
-    }
-    export function findNextToken(previousToken: Node, parent: Node, sourceFile: SourceFile): Node | undefined {
-        return ts.findNextToken(previousToken, parent, sourceFile);
-    }
-}

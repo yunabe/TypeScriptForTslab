@@ -2787,9 +2787,3 @@ namespace ts.Completions {
         return false;
     }
 }
-
-namespace ts.tslab {
-    export function getCompletionsAtPosition(host: LanguageServiceHost, program: Program, log: (message: string) => void, sourceFile: SourceFile, position: number, preferences: UserPreferences, triggerCharacter: CompletionsTriggerCharacter | undefined): CompletionInfo | undefined {
-        return Completions.getCompletionsAtPosition(host, program, log, sourceFile, position, preferences, triggerCharacter);
-    }
-}

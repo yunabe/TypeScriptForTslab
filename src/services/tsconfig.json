@@ -9,6 +9,7 @@
         { "path": "../jsTyping" }
     ],
     "files": [
+        "tslab.ts",
         "types.ts",
         "utilities.ts",
         "classifier.ts",

@@ -42,7 +42,8 @@ main().catch(console.error);
 
 async function main() {
     const gh = new Octokit({ auth: options.token });
-    const response = await gh.pulls.createReviewRequest({
+    // Cherry-picked https://github.com/microsoft/TypeScript/pull/39031
+    const response = await gh.pulls.requestReviewers({
         owner: options.owner,
         repo: options.repo,
         pull_number,
