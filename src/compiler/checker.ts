@@ -330,6 +330,7 @@ namespace ts {
         const noImplicitThis = getStrictOptionValue(compilerOptions, "noImplicitThis");
         const keyofStringsOnly = !!compilerOptions.keyofStringsOnly;
         const freshObjectLiteralFlag = compilerOptions.suppressExcessPropertyErrors ? 0 : ObjectFlags.FreshLiteral;
+        const disableTopLevelAwait = !!compilerOptions.disableTopLevelAwait;
 
         const emitResolver = createResolver();
         const nodeBuilder = createNodeBuilder();
@@ -27762,7 +27763,7 @@ namespace ts {
             // Grammar checking
             if (produceDiagnostics) {
                 if (!(node.flags & NodeFlags.AwaitContext)) {
-                    if (isTopLevelAwait(node)) {
+                    if (!disableTopLevelAwait && isTopLevelAwait(node)) {
                         const sourceFile = getSourceFileOfNode(node);
                         if (!hasParseDiagnostics(sourceFile)) {
                             let span: TextSpan | undefined;
