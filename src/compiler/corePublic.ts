@@ -93,4 +93,8 @@ namespace ts {
         EqualTo     = 0,
         GreaterThan = 1
     }
+
+    export function getNullTransformationContext(): TransformationContext {
+        return nullTransformationContext;
+    }
 }

@@ -13,6 +13,7 @@ Base version: `v3.9.5`
 - Remove `"bin"` from `package.json`.
 - Remove `"should be acknowledged when they change"` from `unittests/publicApi.ts` to skip the compatibility validation.
 - Add `disableTopLevelAwait` to the compiler options to support TLA properly in tslab.
+- Add `getNullTransformationContext` to export `nullTransformationContext`.
 
 ## Merge with a newer version of TypeScript
 
