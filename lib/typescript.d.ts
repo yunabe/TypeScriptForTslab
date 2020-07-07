@@ -61,6 +61,7 @@ declare namespace ts {
     interface Push<T> {
         push(...values: T[]): void;
     }
+    function getNullTransformationContext(): TransformationContext;
 }
 declare namespace ts {
     export type Path = string & {
